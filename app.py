@@ -33,6 +33,8 @@ ATTENDANCE_PHRASES = [
     "missed",
     "cancel",
     "cancelled",
+    "reschedule",
+    "need to rescheudule",
     "haven't been to therapy",
     "havent been to therapy",
     "haven't seen my therapist",
