@@ -59,6 +59,10 @@ NEGATIVE_ATTENDANCE_PHRASES = [
     "dont have a way there",
     "cant take off work",
     "can't take off work",
+    "don't want to go anymore",
+    "dont want to go anymore",
+    "can i stop going",
+    "can i stop coming,
     "chiropractor hasnt called me back",
     "chiropractor hasn't called me back",
     "waiting for someone to call me back",
@@ -152,4 +156,3 @@ def sms_webhook():
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=5000)
   
-   
