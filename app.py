@@ -62,7 +62,7 @@ NEGATIVE_ATTENDANCE_PHRASES = [
     "don't want to go anymore",
     "dont want to go anymore",
     "can i stop going",
-    "can i stop coming,
+    "can i stop coming",
     "chiropractor hasnt called me back",
     "chiropractor hasn't called me back",
     "waiting for someone to call me back",
