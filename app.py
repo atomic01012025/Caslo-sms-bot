@@ -10,32 +10,34 @@ TWILIO_ACCOUNT_SID = os.environ.get("TWILIO_ACCOUNT_SID")
 TWILIO_AUTH_TOKEN = os.environ.get("TWILIO_AUTH_TOKEN")
 TWILIO_NUMBER = os.environ.get("TWILIO_NUMBER")      # your Twilio bot number, e.g. +12169995553
 ALERT_NUMBER = os.environ.get("ALERT_NUMBER")        # your cell / intake line for alerts
-CALENDAR_URL = os.environ.get("CALENDAR_URL")        # scheduling link (Calendly, etc.)
+CALENDAR_URL = os.environ.get("CALENDAR_URL")        # scheduling link, e.g. https://calendly.com/caslo_consult
 
 client = Client(TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN)
 
-# 1️⃣ Phrases that suggest they are NOT attending therapy (our original “red flags”)
-NEGATIVE_THERAPY_PHRASES = [
+# phrases that indicate "I haven’t been in a while" / not attending therapy regularly
+NEGATIVE_ATTENDANCE_PHRASES = [
     "haven't been in a while",
     "havent been in a while",
     "haven't been going",
     "havent been going",
     "haven't gone",
     "havent gone",
-    "havent been",
-    "haven't been",
+    "stopped going to therapy",
+    "stopped going therapy",
     "stopped going",
     "stopped coming",
     "haven't had a session",
     "havent had a session",
     "missed my last few",
     "missed my last couple",
+    "missed my last",
     "missed",
     "cancel",
     "cancelled",
     "reschedule",
     "rescheduled",
     "need to reschedule",
+    "need to set",
     "haven't been to therapy",
     "havent been to therapy",
     "haven't seen my therapist",
@@ -53,69 +55,48 @@ NEGATIVE_THERAPY_PHRASES = [
     "don't have a ride",
     "dont have a ride",
     "need a ride", 
-    "need a ride",
-    "don't have a way there",
+    "don't have a way there", 
     "dont have a way there",
-    "can't take off work",
     "cant take off work",
+    "can't take off work",
+    "chiropractor hasnt called me back",
+    "chiropractor hasn't called me back",
+    "waiting for someone to call me back",
+    "no one called me",
     "i haven't been there in a while",
     "i havent been there in a while",
 ]
 
-# 2️⃣ Phrases that suggest they ARE attending therapy
+# phrases that indicate ongoing / regular therapy attendance
 POSITIVE_THERAPY_PHRASES = [
-    "i've been going to therapy",
-    "ive been going to therapy",
-    "i have been going to therapy",
+    "i've been going to therapy regularly",
+    "ive been going to therapy regularly",
+    "i have been going to therapy regularly",
+    "i've been going regularly",
+    "ive been going regularly",
+    "i go to therapy every week",
+    "i go to therapy each week",
     "i've been in therapy",
     "ive been in therapy",
-    "i have been in therapy",
-    "i'm going to therapy",
-    "im going to therapy",
-    "i am going to therapy",
-    "i've been attending therapy",
-    "ive been attending therapy",
+    "i am in therapy",
+    "i'm in therapy",
+    "im in therapy",
     "still going to therapy",
     "still in therapy",
-    "i go to therapy regularly",
-    "i've been making my therapy appointments",
-    "ive been making my therapy appointments",
+    "i've been going",
+    "i'm going",
+    "im going",
+    "i'm going",
+    "i've been keeping up with therapy",
 ]
 
-# 3️⃣ Phrases indicating catastrophic / serious injuries (15 including electrocution)
-CATASTROPHIC_INJURY_PHRASES = [
-    "catastrophic injury",
-    "catastrophic injuries",
-    "electrocution",
-    "electrocuted",
-    "severe burn",
-    "third degree burn",
-    "third-degree burn",
-    "spinal cord injury",
-    "spinal cord damage",
-    "paralyzed",
-    "paralysis",
-    "traumatic brain injury",
-    "tbi",
-    "brain injury",
-    "amputation",
-    "lost my leg",
-    "lost my arm",
-    "lost a limb",
-]
-
-def text_matches_any(text: str, phrases: list[str]) -> bool:
-    t = text.lower().strip()
-    return any(phrase in t for phrase in phrases)
-
-def is_negative_therapy(text: str) -> bool:
-    return text_matches_any(text, NEGATIVE_THERAPY_PHRASES)
+def is_negative_attendance(text: str) -> bool:
+    text = text.lower().strip()
+    return any(phrase in text for phrase in NEGATIVE_ATTENDANCE_PHRASES)
 
 def is_positive_therapy(text: str) -> bool:
-    return text_matches_any(text, POSITIVE_THERAPY_PHRASES)
-
-def is_catastrophic_injury(text: str) -> bool:
-    return text_matches_any(text, CATASTROPHIC_INJURY_PHRASES)
+    text = text.lower().strip()
+    return any(phrase in text for phrase in POSITIVE_THERAPY_PHRASES)
 
 @app.route("/sms", methods=["POST"])
 def sms_webhook():
@@ -132,11 +113,11 @@ def sms_webhook():
         )
         return Response(str(resp), mimetype="application/xml")
 
-    # 1️⃣ They are NOT attending therapy → alert + follow-up message
-    if is_negative_therapy(incoming_text):
+    # 1️⃣ Negative attendance: "haven't been in a while" etc. → alert + follow-up message
+    if is_negative_attendance(incoming_text):
         alert_msg = (
-            f"Therapy attendance alert: client {from_number} texted: \"{incoming_text}\". "
-            "Suggested follow-up."
+            f"Attendance alert: client {from_number} texted: \"{incoming_text}\". "
+            "Suggested follow-up about therapy attendance."
         )
         if ALERT_NUMBER:
             try:
@@ -152,43 +133,23 @@ def sms_webhook():
             "Thanks for checking in. Our team will be in touch shortly to make sure you have everything you need."
         )
 
-    # 2️⃣ They ARE attending therapy → send your “Great! Thank you…” message
+    # 2️⃣ Positive therapy updates: "I've been going regularly" etc. → encouragement + Calendly link
     elif is_positive_therapy(incoming_text):
         resp.message(
             "Great! Thank you for the update. Keep us posted on your progress. "
             f"If you need anything from us, please schedule a meeting using the link: {CALENDAR_URL}"
         )
 
-    # 3️⃣ Catastrophic / serious injury keywords → light PI routing for now
-    elif is_catastrophic_injury(incoming_text):
-        # Optional: also alert the firm about this lead
-        if ALERT_NUMBER:
-            lead_alert = (
-                f"Catastrophic injury lead: client {from_number} texted: \"{incoming_text}\"."
-            )
-            try:
-                client.messages.create(
-                    body=lead_alert,
-                    from_=TWILIO_NUMBER,
-                    to=ALERT_NUMBER
-                )
-            except Exception as e:
-                print("Lead alert error:", e)
-
-        resp.message(
-            "Thank you for reaching out about your injuries. Our firm may be able to help. "
-            f"The fastest way to get started is to schedule a consultation here: {CALENDAR_URL}"
-        )
-
-    # 4️⃣ Everything else → generic route to calendar (safe default for now)
+    # 3️⃣ Everything else → generic Calendly routing (no attorney-language for now)
     else:
         resp.message(
-            "That’s something your attorney can go over with you directly.\n"
-            f"You can schedule a time that works for you here: {CALENDAR_URL}"
+            "Thanks for reaching out. If you need anything from us, please schedule a meeting using the link: "
+            f"{CALENDAR_URL}"
         )
 
     return Response(str(resp), mimetype="application/xml")
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=5000)
+  
    
