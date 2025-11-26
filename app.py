@@ -115,6 +115,11 @@ THERAPY_POSITIVE_PHRASES = [
     "ive been going", 
     "i'm going",
     "im going", 
+    "been consistent with my therapy",
+    "have not missed any sessions",
+    "kept my appointmnets",
+    "have on track with therapy",
+    "been going to my appointments",
     "i've been in therapy consistently",
     "ive been in therapy consistently",
 ]
@@ -128,8 +133,12 @@ ACCIDENT_PHRASES = [
     "hurt in an accident",
     "injured in an accident",
     "slip and fall",
+    "18 wheeler",
+    "police involved shooting",
+    "police chase accident",
     "slipped and fell",
     "trip and fall",
+    "slip and fall"
     "hit and run",
     "pedestrian accident",
     "ran me over",
@@ -138,49 +147,110 @@ ACCIDENT_PHRASES = [
     "t-boned",
     "crash",
     "wreck",
+    "burn injury",
+    "burned",
+    "t bone",
+    "t-bone",
+    "hurt at work",
+    "rollover",
+    "roll over",
+    "ambulance",
+    "broken bone",
+    "construction accident",
+    "on the job injury", 
+    "object in food",
+    "screw in food",
+    "metal in food",
+    "broken tooth",
+
+ # catastrophic injuries
     "electrocuted",
     "electrocution",
     "burn injury",
     "burned",
-    "catastrophic injury",
-    "brain injury",
+    "serious burn",
     "spinal cord injury",
     "paralyzed",
     "paralysis",
+    "amputation",
+    "lost my leg",
+    "lost my arm",
+    "traumatic brain injury",
+    "tbi",
+    "catastrophic injury",
+    "brain injury",
+    "coma",
+    "concussion",
+    "broken bone", 
+    "bone fracture",
     "wrongful death",
+    "my loved one died",
+    "family member died",
+    "fatal accident",
+    "death",
     "killed",
-    "died from",
-    "no insurance",
-    "don't have insurance",
-    "dont have insurance",
-    "my attorney hasn’t done anything",
+    "birth defect",
+    "died",
+
+    # dissatisfaction with current attorney / timing
     "my attorney hasn't done anything",
-    "my lawyer hasn’t done anything",
     "my lawyer hasn't done anything",
-    "need a lawyer",
-    "need an attorney",
+    "my attorney has not done anything",
+    "my lawyer has not done anything",
+    "can i change lawyers",
+    "switch lawyers",
+    "switch attorneys",
+    "is it too late to sue",
+    "is it too late to file",
+    "too late to file a claim",
+    "too late to file a lawsuit",
+    "statute of limitations",
+    "do i still have a case",
+
+    # needing a lawyer / unsure
+    "i need a lawyer",
+    "i need an attorney",
     "do i need a lawyer",
     "do i need an attorney",
+    "don't know if i need a lawyer",
+    "dont know if i need a lawyer",
+    "not sure if i need a lawyer",
+
+      # money / insurance / payout questions
     "how much money can i get",
-    "how much is my case worth",
-    "is it too late to file",
-    "is it too late to sue",
+    "how much will i get",
+    "what is my case worth",
+    "how fast will i get paid",
+    "how quickly will i get paid",
+    "i don't have insurance",
+    "i dont have insurance",
+    "other driver didn't have insurance",
+    "other driver didnt have insurance",
+    "uninsured driver",
+    "underinsured driver",
 ]
 
-def contains_any(text: str, phrases) -> bool:
-    t = text.lower().strip()
-    return any(p in t for p in phrases)
+# --------------------------------------------------------------------
+# HELPER FUNCTIONS
+# --------------------------------------------------------------------
 
-# ---------- MAIN WEBHOOK ----------
+def text_matches_any(message_text: str, phrase_list) -> bool:
+    text = message_text.lower().strip()
+    return any(phrase in text for phrase in phrase_list)
+
+# --------------------------------------------------------------------
+# MAIN WEBHOOK
+# --------------------------------------------------------------------
 
 @app.route("/sms", methods=["POST"])
 def sms_webhook():
+    """Main Twilio webhook for incoming SMS."""
     incoming_text = request.form.get("Body", "").strip()
     from_number = request.form.get("From", "")
 
     resp = MessagingResponse()
 
-    # Safety check: config present?
+    # If critical config is missing, fail gracefully for the client.
     if not (TWILIO_ACCOUNT_SID and TWILIO_AUTH_TOKEN and TWILIO_NUMBER and CALENDAR_URL):
         resp.message(
             "Our firm is temporarily unable to process messages. "
@@ -188,53 +258,80 @@ def sms_webhook():
         )
         return Response(str(resp), mimetype="application/xml")
 
-    # ----- Branch 1: Therapy – attendance risk (haven’t been going) -----
-    if contains_any(incoming_text, THERAPY_NEGATIVE_PHRASES):
-        # Alert you / your team
-        alert_msg = (
-            f"Therapy attendance alert: client {from_number} texted: \"{incoming_text}\". "
-            "Suggested follow-up."
-        )
+    # ----------------------------------------------------------------
+    # 1) Therapy attendance risk (hasn't been going)
+    # ----------------------------------------------------------------
+    if text_matches_any(incoming_text, THERAPY_NEGATIVE_PHRASES):
+        # Internal alert to you / your intake line
         if ALERT_NUMBER:
+            alert_msg = (
+                f"Therapy attendance alert:\n"
+                f"From: {from_number}\n"
+                f"Message: \"{incoming_text}\""
+            )
             try:
-                client.messages.create(
+                twilio_client.messages.create(
                     body=alert_msg,
                     from_=TWILIO_NUMBER,
                     to=ALERT_NUMBER
                 )
             except Exception as e:
-                print("Alert error:", e)
-
-        # Client response
+                print("Error sending therapy attendance alert:", e)
+                  # Client-facing response
         resp.message(
             "Thanks for checking in. Our team will be in touch shortly to make sure you have everything you need."
         )
+        return Response(str(resp), mimetype="application/xml")
 
-    # ----- Branch 2: Therapy – positive attendance (they ARE going) -----
-    elif contains_any(incoming_text, THERAPY_POSITIVE_PHRASES):
+    # ----------------------------------------------------------------
+    # 2) Therapy positive / attending regularly
+    # ----------------------------------------------------------------
+    if text_matches_any(incoming_text, THERAPY_POSITIVE_PHRASES):
         resp.message(
             "Great! Thank you for the update. Keep us posted on your progress. "
-            f"If you need anything from us, please schedule a meeting using the link: {CALENDAR_URL}"
+            f"If you need anything from us, please schedule a meeting using this link: {CALENDAR_URL}"
         )
+        return Response(str(resp), mimetype="application/xml")
 
-    # ----- Branch 3: Accident / catastrophic injury / PI lead -----
-    elif contains_any(incoming_text, ACCIDENT_PHRASES):
+    # ----------------------------------------------------------------
+    # 3) Injury / accident / catastrophic injury / “need a lawyer”
+    # ----------------------------------------------------------------
+    if text_matches_any(incoming_text, INJURY_LEAD_PHRASES):
+        # Internal alert for potential new case
+        if ALERT_NUMBER:
+            alert_msg = (
+                "New potential injury lead:\n"
+                f"From: {from_number}\n"
+                f"Message: \"{incoming_text}\""
+            )
+            try:
+                twilio_client.messages.create(
+                    body=alert_msg,
+                    from_=TWILIO_NUMBER,
+                    to=ALERT_NUMBER
+                )
+            except Exception as e:
+                print("Error sending injury lead alert:", e)
+
+        # Client-facing response (as in your screenshot)
         resp.message(
             "Thank you for reaching out about your situation. Our firm may be able to help, "
             "and the best next step is to speak with an attorney directly.\n\n"
             f"Please use this link to schedule a consultation: {CALENDAR_URL}"
         )
+        return Response(str(resp), mimetype="application/xml")
 
-    # ----- Branch 4: Everything else → general legal question routing -----
-    else:
-        resp.message(
-            "That’s something your attorney can go over with you directly.\n"
-            f"You can schedule a time that works for you here: {CALENDAR_URL}"
-        )
-
+    # ----------------------------------------------------------------
+    # 4) Default: everything else → generic attorney + calendar
+    # ----------------------------------------------------------------
+    resp.message(
+        "That’s something your attorney can go over with you directly.\n"
+        f"You can schedule a time that works for you here: {CALENDAR_URL}"
+    )
     return Response(str(resp), mimetype="application/xml")
 
 
 if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=5000)
-  
+    # Local testing; in production Render runs this via gunicorn.
+    app.run(host="0.0.0.0", port=5000, debug=False)
+                
