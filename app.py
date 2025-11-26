@@ -22,7 +22,7 @@ THERAPY_CONCERN_PHRASES = [
     "havent been in a while",
     "haven't been going",
     "havent been going",
-    "havent been", 
+    "havent been",
     "haven't been",
     "haven't gone",
     "havent gone",
@@ -41,8 +41,8 @@ THERAPY_CONCERN_PHRASES = [
     "reschedule",
     "rescheduled",
     "missed a few",
-    "need to reschedule", 
-    "need to set", 
+    "need to reschedule",
+    "need to set",
     "haven't been to therapy",
     "havent been to therapy",
     "haven't seen my therapist",
@@ -53,37 +53,37 @@ THERAPY_CONCERN_PHRASES = [
     "haven't booked therapy",
     "havent booked therapy",
     "don't have transportation",
-    "dont have transportation", 
-    "don't have a ride", 
-    "dont have ride", 
-    "need a ride", 
-    "don't have a way there", 
+    "dont have transportation",
+    "don't have a ride",
+    "dont have ride",
+    "need a ride",
+    "don't have a way there",
     "dont have a way there",
-    "can't take off work", 
-    "cant take off work", 
-    "don't want to go anymore", 
-    "dont want to go anymore", 
-    "can i stop going", 
-    "can i stop coming", 
+    "can't take off work",
+    "cant take off work",
+    "don't want to go anymore",
+    "dont want to go anymore",
+    "can i stop going",
+    "can i stop coming",
     "doctor has not called me",
     "chiropractor hasnt called me",
     "chiropractor hasn't called me",
     "waiting for someone to call me back",
-    "no one called me", 
-    "no one has called me", 
-    "i don't like my doctor", 
-    "i don't like my chiropractor", 
-    "i don't like my therapist", 
-    "its too far", 
-    "it's too far", 
-    "i'm finished", 
+    "no one called me",
+    "no one has called me",
+    "i don't like my doctor",
+    "i don't like my chiropractor",
+    "i don't like my therapist",
+    "its too far",
+    "it's too far",
+    "i'm finished",
     "im finished",
-    "my last appointment was today", 
+    "my last appointment was today",
     "i had my last appointment",
-    "im dont with therapy", 
-    "i'm done with therapy", 
-    "im done", 
-    "i'm done", 
+    "im dont with therapy",
+    "i'm done with therapy",
+    "im done",
+    "i'm done",
     "been avoiding going to therapy",
     "haven't been able to make it to therapy",
     "havent been able to make it to therapy",
@@ -106,16 +106,15 @@ THERAPY_POSITIVE_PHRASES = [
     "i'm still going to therapy",
     "im still going to therapy",
     "still going to therapy",
-    "i've been in therapy", 
+    "i've been in therapy",
     "ive been in therapy",
     "i am in therapy",
     "i'm in therapy",
     "im in therapy",
-    "still going to therapy", 
     "i've been going",
-    "ive been going", 
+    "ive been going",
     "i'm going",
-    "im going", 
+    "im going",
     "been consistent with my therapy",
     "have not missed any sessions",
     "kept my appointmnets",
@@ -139,7 +138,6 @@ ACCIDENT_PHRASES = [
     "police chase accident",
     "slipped and fell",
     "trip and fall",
-    "slip and fall"
     "ran over",
     "run over",
     "hit and run",
@@ -148,34 +146,31 @@ ACCIDENT_PHRASES = [
     "got rear ended",
     "rear-ended",
     "t-boned",
+    "t bone",
     "crash",
     "wreck",
     "burn injury",
     "burned",
-    "uber accident", 
+    "uber accident",
     "lyft accident",
     "ride share accident",
     "rideshare accident",
-    "electrical injuyr",
-    "t bone",
-    "t-bone",
+    "electrical injury",
     "hurt at work",
     "rollover",
     "roll over",
     "ambulance",
     "broken bone",
     "construction accident",
-    "on the job injury", 
+    "on the job injury",
     "object in food",
     "screw in food",
     "metal in food",
     "broken tooth",
 
- # catastrophic injuries
+    # catastrophic injuries
     "electrocuted",
     "electrocution",
-    "burn injury",
-    "burned",
     "serious burn",
     "spinal cord injury",
     "paralyzed",
@@ -189,7 +184,6 @@ ACCIDENT_PHRASES = [
     "brain injury",
     "coma",
     "concussion",
-    "broken bone", 
     "bone fracture",
     "wrongful death",
     "my loved one died",
@@ -263,6 +257,7 @@ LEGAL_QUESTION_PHRASES = [
     "what happens when my case is resolved",
 ]
 
+
 def contains_any(text: str, phrases: list[str]) -> bool:
     t = text.lower()
     return any(p in t for p in phrases)
@@ -306,7 +301,9 @@ def sms_webhook():
             "Please call our office directly."
         )
         return Response(str(resp), mimetype="application/xml")
- msg_type = classify_message(incoming_text)
+
+    # classify the message (THIS LINE WAS MIS-INDENTED BEFORE)
+    msg_type = classify_message(incoming_text)
 
     # ---- 1) THERAPY CONCERN: client hasn't been going ----
     if msg_type == "therapy_concern":
@@ -325,7 +322,7 @@ def sms_webhook():
             except Exception as e:
                 print("Alert error (therapy_concern):", e)
 
-        # client-facing message (your original CASLO line)
+        # client-facing message
         resp.message(
             "Thanks for checking in. Our team will be in touch shortly to make sure you have everything you need."
         )
@@ -339,7 +336,7 @@ def sms_webhook():
 
     # ---- 3) ACCIDENT / CATASTROPHIC INJURY LEAD ----
     elif msg_type == "accident_lead":
-        # (Optional) alert the firm about a potential new case
+        # optional: alert the firm about a potential new case
         if ALERT_NUMBER:
             alert_msg = (
                 f"NEW ACCIDENT LEAD: {from_number} said: \"{incoming_text}\". "
@@ -354,13 +351,13 @@ def sms_webhook():
             except Exception as e:
                 print("Alert error (accident_lead):", e)
 
-        # Client-facing reply (super-light triage → schedule)
+        # client-facing reply (super-light triage → schedule)
         resp.message(
             "I’m sorry to hear you were hurt. Our firm may be able to help, "
             f"and we’d like to learn more. Please schedule a free consultation here: {CALENDAR_URL}"
         )
-   
- # ---- 4) GENERAL LEGAL QUESTIONS (like “What happens when my case is over?”) ----
+
+    # ---- 4) GENERAL LEGAL QUESTIONS (like “What happens when my case is over?”) ----
     elif msg_type == "legal_question":
         resp.message(
             "That’s something your attorney can go over with you directly.\n"
@@ -369,7 +366,6 @@ def sms_webhook():
 
     # ---- 5) FALLBACK: anything else still gets a response ----
     else:
-        # Generic but safe: route them to schedule with the firm
         resp.message(
             "Thank you for reaching out. Our team is happy to talk through your situation.\n"
             f"You can schedule a time that works for you here: {CALENDAR_URL}"
