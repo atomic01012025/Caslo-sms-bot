@@ -14,6 +14,10 @@ CALENDAR_URL = os.environ.get("CALENDAR_URL")        # scheduling link, e.g. htt
 
 client = Client(TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN)
 
+# ---------- SIMPLE IN-MEMORY STATE FOR MULTI-STEP FLOWS ----------
+# Maps from_number -> {"flow": "accident", "step": 1 or 2, "answers": {...}}
+conversation_state = {}
+
 # ---------- PHRASE LISTS ----------
 
 # 1) Therapy attendance risk (haven’t been going)
@@ -146,7 +150,6 @@ ACCIDENT_PHRASES = [
     "got rear ended",
     "rear-ended",
     "t-boned",
-    "t bone",
     "crash",
     "wreck",
     "burn injury",
@@ -155,7 +158,9 @@ ACCIDENT_PHRASES = [
     "lyft accident",
     "ride share accident",
     "rideshare accident",
-    "electrical injury",
+    "electrical injuyr",
+    "t bone",
+    "t-bone",
     "hurt at work",
     "rollover",
     "roll over",
@@ -257,15 +262,13 @@ LEGAL_QUESTION_PHRASES = [
     "what happens when my case is resolved",
 ]
 
-
-def contains_any(text: str, phrases: list[str]) -> bool:
+def contains_any(text, phrases):
     t = text.lower()
     return any(p in t for p in phrases)
 
-
 # ---------- CLASSIFICATION ----------
 
-def classify_message(text: str) -> str:
+def classify_message(text):
     """
     Returns one of:
       - 'therapy_concern'
@@ -284,7 +287,6 @@ def classify_message(text: str) -> str:
         return "legal_question"
     return "other"
 
-
 # ---------- WEBHOOK ----------
 
 @app.route("/sms", methods=["POST"])
@@ -302,12 +304,60 @@ def sms_webhook():
         )
         return Response(str(resp), mimetype="application/xml")
 
-    # classify the message (THIS LINE WAS MIS-INDENTED BEFORE)
+    # ---- FIRST: HANDLE ANY IN-PROGRESS ACCIDENT FLOW ----
+    state = conversation_state.get(from_number)
+    if state and state.get("flow") == "accident":
+        step = state.get("step")
+
+        # STEP 1: answer to "Were you physically injured? YES/NO"
+        if step == 1:
+            answer = incoming_text.strip().lower()
+            state["answers"]["injured"] = answer
+            state["step"] = 2
+
+            resp.message(
+                "Thank you. Do you already have a lawyer for this incident? "
+                "Please reply YES or NO."
+            )
+            return Response(str(resp), mimetype="application/xml")
+
+        # STEP 2: answer to "Do you already have a lawyer? YES/NO"
+        elif step == 2:
+            answer = incoming_text.strip().lower()
+            state["answers"]["has_lawyer"] = answer
+
+            # Send alert to firm with full context
+            if ALERT_NUMBER:
+                answers = state["answers"]
+                alert_msg = (
+                    f"NEW ACCIDENT LEAD (follow-up): {from_number} said: \"{state.get('original_text','')}\". "
+                    f"Injured: {answers.get('injured','')} | "
+                    f"Has lawyer: {answers.get('has_lawyer','')}"
+                )
+                try:
+                    client.messages.create(
+                        body=alert_msg,
+                        from_=TWILIO_NUMBER,
+                        to=ALERT_NUMBER
+                    )
+                except Exception as e:
+                    print("Alert error (accident follow-up):", e)
+
+            # Clear state
+            conversation_state.pop(from_number, None)
+
+            # Send scheduling message
+            resp.message(
+                "Thank you for the information. Our firm will review this.\n"
+                f"Please schedule a free consultation here: {CALENDAR_URL}"
+            )
+            return Response(str(resp), mimetype="application/xml")
+
+    # ---- IF NOT IN AN ACTIVE FLOW, CLASSIFY FRESH MESSAGE ----
     msg_type = classify_message(incoming_text)
 
-    # ---- 1) THERAPY CONCERN: client hasn't been going ----
+    # 1) THERAPY CONCERN: client hasn't been going
     if msg_type == "therapy_concern":
-        # alert you / your firm
         if ALERT_NUMBER:
             alert_msg = (
                 f"THERAPY ATTENDANCE CONCERN: {from_number} said: \"{incoming_text}\". "
@@ -322,25 +372,32 @@ def sms_webhook():
             except Exception as e:
                 print("Alert error (therapy_concern):", e)
 
-        # client-facing message
         resp.message(
             "Thanks for checking in. Our team will be in touch shortly to make sure you have everything you need."
         )
 
-    # ---- 2) THERAPY POSITIVE: client is attending regularly ----
+    # 2) THERAPY POSITIVE: client is attending regularly
     elif msg_type == "therapy_positive":
         resp.message(
             "Great! Thank you for the update. Keep us posted on your progress. "
             f"If you need anything from us, please schedule a meeting using this link: {CALENDAR_URL}"
         )
 
-    # ---- 3) ACCIDENT / CATASTROPHIC INJURY LEAD ----
+    # 3) ACCIDENT / CATASTROPHIC INJURY LEAD
     elif msg_type == "accident_lead":
-        # optional: alert the firm about a potential new case
+        # Start two-question flow
+        conversation_state[from_number] = {
+            "flow": "accident",
+            "step": 1,
+            "answers": {},
+            "original_text": incoming_text,
+        }
+
+        # Optional: initial alert that an accident lead came in
         if ALERT_NUMBER:
             alert_msg = (
-                f"NEW ACCIDENT LEAD: {from_number} said: \"{incoming_text}\". "
-                "Potential PI / catastrophic injury case."
+                f"NEW ACCIDENT LEAD (started): {from_number} said: \"{incoming_text}\". "
+                "Bot is collecting quick follow-up answers."
             )
             try:
                 client.messages.create(
@@ -349,22 +406,21 @@ def sms_webhook():
                     to=ALERT_NUMBER
                 )
             except Exception as e:
-                print("Alert error (accident_lead):", e)
+                print("Alert error (accident_lead start):", e)
 
-        # client-facing reply (super-light triage → schedule)
         resp.message(
-            "I’m sorry to hear you were hurt. Our firm may be able to help, "
-            f"and we’d like to learn more. Please schedule a free consultation here: {CALENDAR_URL}"
+            "I’m sorry to hear you were hurt. I’ll ask just 2 quick questions so our team can prepare before we talk.\n\n"
+            "First: Were you physically injured? Please reply YES or NO."
         )
 
-    # ---- 4) GENERAL LEGAL QUESTIONS (like “What happens when my case is over?”) ----
+    # 4) GENERAL LEGAL QUESTIONS (like “What happens when my case is over?”)
     elif msg_type == "legal_question":
         resp.message(
             "That’s something your attorney can go over with you directly.\n"
             f"You can schedule a time that works for you here: {CALENDAR_URL}"
         )
 
-    # ---- 5) FALLBACK: anything else still gets a response ----
+    # 5) FALLBACK: anything else
     else:
         resp.message(
             "Thank you for reaching out. Our team is happy to talk through your situation.\n"
