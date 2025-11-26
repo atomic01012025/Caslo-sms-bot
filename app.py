@@ -17,7 +17,7 @@ client = Client(TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN)
 # ---------- PHRASE LISTS ----------
 
 # 1) Therapy attendance risk (haven’t been going)
-THERAPY_NEGATIVE_PHRASES = [
+THERAPY_CONCERN_PHRASES = [
     "haven't been in a while",
     "havent been in a while",
     "haven't been going",
@@ -40,6 +40,7 @@ THERAPY_NEGATIVE_PHRASES = [
     "cancelled",
     "reschedule",
     "rescheduled",
+    "missed a few",
     "need to reschedule", 
     "need to set", 
     "haven't been to therapy",
@@ -139,6 +140,8 @@ ACCIDENT_PHRASES = [
     "slipped and fell",
     "trip and fall",
     "slip and fall"
+    "ran over",
+    "run over",
     "hit and run",
     "pedestrian accident",
     "ran me over",
@@ -149,6 +152,11 @@ ACCIDENT_PHRASES = [
     "wreck",
     "burn injury",
     "burned",
+    "uber accident", 
+    "lyft accident",
+    "ride share accident",
+    "rideshare accident",
+    "electrical injuyr",
     "t bone",
     "t-bone",
     "hurt at work",
@@ -216,7 +224,7 @@ ACCIDENT_PHRASES = [
     "dont know if i need a lawyer",
     "not sure if i need a lawyer",
 
-      # money / insurance / payout questions
+    # money / insurance / payout questions
     "how much money can i get",
     "how much will i get",
     "what is my case worth",
@@ -230,108 +238,145 @@ ACCIDENT_PHRASES = [
     "underinsured driver",
 ]
 
-# --------------------------------------------------------------------
-# HELPER FUNCTIONS
-# --------------------------------------------------------------------
+# 4) General legal questions about case timing / value / status
+LEGAL_QUESTION_PHRASES = [
+    "what happens when my case is over",
+    "what happens when my case is finished",
+    "what happens when my case is done",
+    "what happens when my case ends",
+    "what happens when the case is over",
+    "when my case is over",
+    "when my case is finished",
+    "when my case is done",
+    "is it too late to file",
+    "too late to file a claim",
+    "too late to file a lawsuit",
+    "is it too late to sue",
+    "do i still have time to file",
+    "how much money can i get",
+    "how much is my case worth",
+    "how much is my claim worth",
+    "how fast will i get paid",
+    "how long will my case take",
+    "how long does a case take",
+    "how long does a claim take",
+    "what happens when my case is resolved",
+]
 
-def text_matches_any(message_text: str, phrase_list) -> bool:
-    text = message_text.lower().strip()
-    return any(phrase in text for phrase in phrase_list)
+def contains_any(text: str, phrases: list[str]) -> bool:
+    t = text.lower()
+    return any(p in t for p in phrases)
 
-# --------------------------------------------------------------------
-# MAIN WEBHOOK
-# --------------------------------------------------------------------
+
+# ---------- CLASSIFICATION ----------
+
+def classify_message(text: str) -> str:
+    """
+    Returns one of:
+      - 'therapy_concern'
+      - 'therapy_positive'
+      - 'accident_lead'
+      - 'legal_question'
+      - 'other'
+    """
+    if contains_any(text, THERAPY_CONCERN_PHRASES):
+        return "therapy_concern"
+    if contains_any(text, THERAPY_POSITIVE_PHRASES):
+        return "therapy_positive"
+    if contains_any(text, ACCIDENT_PHRASES):
+        return "accident_lead"
+    if contains_any(text, LEGAL_QUESTION_PHRASES):
+        return "legal_question"
+    return "other"
+
+
+# ---------- WEBHOOK ----------
 
 @app.route("/sms", methods=["POST"])
 def sms_webhook():
-    """Main Twilio webhook for incoming SMS."""
     incoming_text = request.form.get("Body", "").strip()
     from_number = request.form.get("From", "")
 
     resp = MessagingResponse()
 
-    # If critical config is missing, fail gracefully for the client.
+    # Basic safety check
     if not (TWILIO_ACCOUNT_SID and TWILIO_AUTH_TOKEN and TWILIO_NUMBER and CALENDAR_URL):
         resp.message(
             "Our firm is temporarily unable to process messages. "
             "Please call our office directly."
         )
         return Response(str(resp), mimetype="application/xml")
+ msg_type = classify_message(incoming_text)
 
-    # ----------------------------------------------------------------
-    # 1) Therapy attendance risk (hasn't been going)
-    # ----------------------------------------------------------------
-    if text_matches_any(incoming_text, THERAPY_NEGATIVE_PHRASES):
-        # Internal alert to you / your intake line
+    # ---- 1) THERAPY CONCERN: client hasn't been going ----
+    if msg_type == "therapy_concern":
+        # alert you / your firm
         if ALERT_NUMBER:
             alert_msg = (
-                f"Therapy attendance alert:\n"
-                f"From: {from_number}\n"
-                f"Message: \"{incoming_text}\""
+                f"THERAPY ATTENDANCE CONCERN: {from_number} said: \"{incoming_text}\". "
+                "Consider reaching out."
             )
             try:
-                twilio_client.messages.create(
+                client.messages.create(
                     body=alert_msg,
                     from_=TWILIO_NUMBER,
                     to=ALERT_NUMBER
                 )
             except Exception as e:
-                print("Error sending therapy attendance alert:", e)
-                  # Client-facing response
+                print("Alert error (therapy_concern):", e)
+
+        # client-facing message (your original CASLO line)
         resp.message(
             "Thanks for checking in. Our team will be in touch shortly to make sure you have everything you need."
         )
-        return Response(str(resp), mimetype="application/xml")
 
-    # ----------------------------------------------------------------
-    # 2) Therapy positive / attending regularly
-    # ----------------------------------------------------------------
-    if text_matches_any(incoming_text, THERAPY_POSITIVE_PHRASES):
+    # ---- 2) THERAPY POSITIVE: client is attending regularly ----
+    elif msg_type == "therapy_positive":
         resp.message(
             "Great! Thank you for the update. Keep us posted on your progress. "
             f"If you need anything from us, please schedule a meeting using this link: {CALENDAR_URL}"
         )
-        return Response(str(resp), mimetype="application/xml")
 
-    # ----------------------------------------------------------------
-    # 3) Injury / accident / catastrophic injury / “need a lawyer”
-    # ----------------------------------------------------------------
-    if text_matches_any(incoming_text, INJURY_LEAD_PHRASES):
-        # Internal alert for potential new case
+    # ---- 3) ACCIDENT / CATASTROPHIC INJURY LEAD ----
+    elif msg_type == "accident_lead":
+        # (Optional) alert the firm about a potential new case
         if ALERT_NUMBER:
             alert_msg = (
-                "New potential injury lead:\n"
-                f"From: {from_number}\n"
-                f"Message: \"{incoming_text}\""
+                f"NEW ACCIDENT LEAD: {from_number} said: \"{incoming_text}\". "
+                "Potential PI / catastrophic injury case."
             )
             try:
-                twilio_client.messages.create(
+                client.messages.create(
                     body=alert_msg,
                     from_=TWILIO_NUMBER,
                     to=ALERT_NUMBER
                 )
             except Exception as e:
-                print("Error sending injury lead alert:", e)
+                print("Alert error (accident_lead):", e)
 
-        # Client-facing response (as in your screenshot)
+        # Client-facing reply (super-light triage → schedule)
         resp.message(
-            "Thank you for reaching out about your situation. Our firm may be able to help, "
-            "and the best next step is to speak with an attorney directly.\n\n"
-            f"Please use this link to schedule a consultation: {CALENDAR_URL}"
+            "I’m sorry to hear you were hurt. Our firm may be able to help, "
+            f"and we’d like to learn more. Please schedule a free consultation here: {CALENDAR_URL}"
         )
-        return Response(str(resp), mimetype="application/xml")
+   
+ # ---- 4) GENERAL LEGAL QUESTIONS (like “What happens when my case is over?”) ----
+    elif msg_type == "legal_question":
+        resp.message(
+            "That’s something your attorney can go over with you directly.\n"
+            f"You can schedule a time that works for you here: {CALENDAR_URL}"
+        )
 
-    # ----------------------------------------------------------------
-    # 4) Default: everything else → generic attorney + calendar
-    # ----------------------------------------------------------------
-    resp.message(
-        "That’s something your attorney can go over with you directly.\n"
-        f"You can schedule a time that works for you here: {CALENDAR_URL}"
-    )
+    # ---- 5) FALLBACK: anything else still gets a response ----
+    else:
+        # Generic but safe: route them to schedule with the firm
+        resp.message(
+            "Thank you for reaching out. Our team is happy to talk through your situation.\n"
+            f"You can schedule a time that works for you here: {CALENDAR_URL}"
+        )
+
     return Response(str(resp), mimetype="application/xml")
 
 
 if __name__ == "__main__":
-    # Local testing; in production Render runs this via gunicorn.
-    app.run(host="0.0.0.0", port=5000, debug=False)
-                
+    app.run(host="0.0.0.0", port=5000)
